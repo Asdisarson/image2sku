@@ -1,0 +1,68 @@
+/* Reset some default styles */
+body, h1, h2, p, button, input {
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+body {
+    background-color: #f0f0f0;
+}
+
+.wrap {
+    max-width: 1200px;
+    margin: 30px auto;
+}
+
+h1 {
+    font-size: 24px;
+    margin-bottom: 20px;
+}
+
+.image2sku-drag-drop {
+    border: 2px dashed #8f8f8f;
+    background-color: #c0c0c0;
+    color: #333;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    position: relative;
+}
+
+#image2sku-file-input {
+    display: none;
+}
+
+.image2sku-previews img {
+    width: 80px;
+    height: 80px;
+    margin-right: 5px;
+    margin-bottom: 5px;
+    border: 2px solid #8f8f8f;
+}
+
+#image2sku-progress {
+    width: 100%;
+    margin-top: 10px;
+}
+
+.btn {
+    background-color: #4c4c4c;
+    color: #fff;
+    padding: 10px 20px;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+.btn-secondary {
+    background-color: #8f8f8f;
+}
+
+#image2sku-results {
+    margin-top: 20px;
+}
+
+#image2sku-download-report {
+    margin-top: 10px;
+}
