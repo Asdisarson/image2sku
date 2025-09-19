@@ -68,15 +68,28 @@ function image2sku_admin_page()
 }
 
 // Process image upload function (implement according to your requirements)
-function process_image_upload($uploaded_images, $index, $product_id, $additional_image = false)
+function process_image_upload($uploaded_images, $index, $product_id)
 {
     $filename = $uploaded_images['name'][$index];
     $filetmp = $uploaded_images['tmp_name'][$index];
     $filetype = wp_check_filetype(basename($filename), null);
 
+    // Validate file type
+    if (!$filetype['ext'] || !$filetype['type']) {
+        error_log('Image2SKU: Invalid file type for ' . $filename);
+        return false;
+    }
+
+    // Validate file exists and is readable
+    if (!file_exists($filetmp) || !is_readable($filetmp)) {
+        error_log('Image2SKU: Cannot read uploaded file ' . $filename);
+        return false;
+    }
+
     // Upload the image to the WordPress media library
     $upload = wp_upload_bits($filename, null, file_get_contents($filetmp));
     if ($upload['error']) {
+        error_log('Image2SKU: Upload error for ' . $filename . ': ' . $upload['error']);
         return false;
     }
 
@@ -89,7 +102,9 @@ function process_image_upload($uploaded_images, $index, $product_id, $additional
     );
 
     $attach_id = wp_insert_attachment($attachment, $upload['file'], $product_id);
-    if (!$attach_id) {
+    if (!$attach_id || is_wp_error($attach_id)) {
+        $error_msg = is_wp_error($attach_id) ? $attach_id->get_error_message() : 'Unknown error creating attachment';
+        error_log('Image2SKU: Failed to create attachment for ' . $filename . ': ' . $error_msg);
         return false;
     }
 
@@ -106,12 +121,17 @@ function process_image_upload($uploaded_images, $index, $product_id, $additional
     if (!$featured_image_id) {
         // Set the uploaded image as the featured image if the product doesn't have one
         set_post_thumbnail($product_id, $attach_id);
-    }
-    if ($additional_image) {
+    } else {
         // Add the uploaded image as an additional image if the product already has a featured image
         $product_gallery = get_post_meta($product_id, '_product_image_gallery', true);
-        $product_gallery = !empty($product_gallery) ? $product_gallery . ',' . $attach_id : $attach_id;
-        update_post_meta($product_id, '_product_image_gallery', $product_gallery);
+        $gallery_ids = !empty($product_gallery) ? explode(',', $product_gallery) : array();
+        
+        // Prevent duplicate images in gallery
+        if (!in_array($attach_id, $gallery_ids)) {
+            $gallery_ids[] = $attach_id;
+            $product_gallery = implode(',', $gallery_ids);
+            update_post_meta($product_id, '_product_image_gallery', $product_gallery);
+        }
     }
 
     return $attach_id;
@@ -134,44 +154,45 @@ function image2sku_upload_images_callback()
             // Perform server-side error checking and processing here
             $filename = $uploaded_images['name'][$i];
             $image_sku = pathinfo($filename, PATHINFO_FILENAME); // Get SKU from image filename (without extension)
-            $additional_image = false;
-            $product = wc_get_product_id_by_sku($image_sku);
-            $pattern = '/(-)?\d+$/';
-            // Replace the matched part (if any) with an empty string
-            $nameWithoutIncrement = preg_replace($pattern, '', $image_sku);// Find a product with the same SKU as the image
-
-            if (!$product) {
-                $product = wc_get_product_id_by_sku($nameWithoutIncrement);
-                $additional_image = true;
+            $product_id = wc_get_product_id_by_sku($image_sku);
+            
+            // If exact SKU match not found, try removing trailing numbers (for variants/additional images)
+            if (!$product_id) {
+                $pattern = '/(-)?\d+$/';
+                $nameWithoutIncrement = preg_replace($pattern, '', $image_sku);
+                $product_id = wc_get_product_id_by_sku($nameWithoutIncrement);
             }
-            if ($product) {
-
-                // Process image, upload to the media library, and set as featured or additional image
-                $image_id = process_image_upload($uploaded_images, $i, $product, $additional_image);
-                $product = wc_get_product($product);
+            
+            if ($product_id) {
+                // Process image, upload to the media library, and set as featured or gallery image
+                $image_id = process_image_upload($uploaded_images, $i, $product_id);
+                $product = wc_get_product($product_id);
+                
                 if ($image_id) {
+                    // Check if this became the featured image or was added to gallery
+                    $featured_image_id = get_post_thumbnail_id($product_id);
+                    $is_featured = ($featured_image_id == $image_id);
+                    
                     $results[] = array(
                         'name' => $product->get_name(),
                         'image' => $product->get_image(),
                         'filename' => $filename,
                         'status' => 'success',
-                        'message' =>   $additional_image ? 'Image set as ' .' additional ' : 'Image set as ' .'featured',
+                        'message' => $is_featured ? 'Image set as featured' : 'Image added to gallery',
                         'link' => $product->get_permalink(),
-
                     );
-
                 } else {
                     $results[] = array(
                         'filename' => $filename,
                         'status' => 'error',
-                        'message' => 'An error occurred while processing the ' . 'image as ' .  $additional_image ? 'additional ' : 'featured',
+                        'message' => 'An error occurred while processing the image',
                     );
                 }
             } else {
                 $results[] = array(
                     'filename' => $filename,
                     'status' => 'invalid',
-                    'message' => 'No product found with the provided SKU: ',
+                    'message' => 'No product found with SKU: ' . $image_sku,
                 );
             }
 
