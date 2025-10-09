@@ -6,24 +6,65 @@ jQuery(document).ready(function ($) {
     // Function to validate files
     function validateFiles(files) {
         const errors = [];
+        const warnings = [];
         const maxSize = image2sku_vars.max_file_size || 10485760; // 10MB default
         const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+        const seenFilenames = {};
 
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
             
+            // Check for empty files
+            if (file.size === 0) {
+                errors.push(`<strong>${file.name}</strong>: File is empty (0 bytes)`);
+                continue;
+            }
+            
             // Check file type
             if (!allowedTypes.includes(file.type)) {
-                errors.push(`${file.name}: Invalid file type. Only images allowed.`);
+                errors.push(`<strong>${file.name}</strong>: Invalid file type "${file.type}". <br><small>✓ Allowed: JPG, PNG, GIF, WebP</small>`);
+                continue;
             }
             
             // Check file size
             if (file.size > maxSize) {
-                errors.push(`${file.name}: File too large. Max size: ${image2sku_vars.max_file_size_mb || '10MB'}`);
+                const fileSize = (file.size / 1048576).toFixed(2); // Convert to MB
+                errors.push(`<strong>${file.name}</strong>: File too large (${fileSize}MB). <br><small>✓ Maximum: ${image2sku_vars.max_file_size_mb || '10MB'}</small>`);
+                continue;
+            }
+            
+            // Check for duplicate filenames
+            if (seenFilenames[file.name]) {
+                warnings.push(`<strong>${file.name}</strong>: Duplicate filename detected`);
+            }
+            seenFilenames[file.name] = true;
+            
+            // Validate filename
+            if (file.name.length > 255) {
+                errors.push(`<strong>${file.name}</strong>: Filename too long (${file.name.length} chars, max 255)`);
+            }
+            
+            // Check for invalid characters in filename
+            if (/[<>:"\/\\|?*\x00-\x1F]/.test(file.name)) {
+                errors.push(`<strong>${file.name}</strong>: Filename contains invalid characters`);
+            }
+            
+            // Check for file extension
+            if (!/\.[^.]+$/.test(file.name)) {
+                errors.push(`<strong>${file.name}</strong>: File has no extension`);
+            }
+            
+            // Warn about suspicious SKU names
+            const sku = file.name.replace(/\.[^.]+$/, ''); // Remove extension
+            if (sku.length < 2) {
+                warnings.push(`<strong>${file.name}</strong>: SKU seems very short (${sku.length} chars)`);
+            }
+            if (sku.length > 50) {
+                warnings.push(`<strong>${file.name}</strong>: SKU seems unusually long (${sku.length} chars)`);
             }
         }
 
-        return errors;
+        return { errors, warnings };
     }
 
     // Function to display image previews
@@ -51,7 +92,23 @@ jQuery(document).ready(function ($) {
             };
             reader.readAsDataURL(file);
         }
+        
+        // Check if auto-upload is enabled
+        if ($('#image2sku_auto_upload').is(':checked')) {
+            setTimeout(function() {
+                $('#image2sku-form').submit();
+            }, 300);
+        }
     }
+    
+    // Clear button functionality
+    $('#image2sku-clear-button').on('click', function () {
+        $('#image2sku-file-input').val('');
+        $('#image2sku-previews').fadeOut(300, function() {
+            $('#image2sku-previews-grid').empty();
+        });
+        $('.image2sku-alert').fadeOut(300, function() { $(this).remove(); });
+    });
 
     // Function to generate a CSV report from the results
     function generateCSVReport(results) {
@@ -95,17 +152,27 @@ jQuery(document).ready(function ($) {
 
         const files = e.originalEvent.dataTransfer.files;
         
-        // Remove previous errors
-        $('.image2sku-alert-error').remove();
+        // Remove previous alerts
+        $('.image2sku-alert').remove();
         
         // Validate files
-        const errors = validateFiles(files);
-        if (errors.length > 0) {
+        const validation = validateFiles(files);
+        
+        // Show errors if any
+        if (validation.errors.length > 0) {
             const errorMessage = $('<div>').addClass('image2sku-alert image2sku-alert-error').html(
-                '<i class="fas fa-exclamation-circle"></i><div>' + errors.join('<br>') + '</div>'
+                '<i class="fas fa-exclamation-circle"></i><div><strong>Cannot upload:</strong><br>' + validation.errors.join('<br><br>') + '</div>'
             );
             $('.image2sku-card').prepend(errorMessage);
             return;
+        }
+        
+        // Show warnings if any
+        if (validation.warnings.length > 0) {
+            const warningMessage = $('<div>').addClass('image2sku-alert image2sku-alert-warning').html(
+                '<i class="fas fa-exclamation-triangle"></i><div><strong>Warnings:</strong><br>' + validation.warnings.join('<br><br>') + '</div>'
+            );
+            $('.image2sku-card').prepend(warningMessage);
         }
         
         $('#image2sku-file-input').prop('files', files);
@@ -119,8 +186,8 @@ jQuery(document).ready(function ($) {
 
     // Handle file input change event to update previews
     $('#image2sku-file-input').on('change', function () {
-        // Remove previous errors
-        $('.image2sku-alert-error').remove();
+        // Remove previous alerts
+        $('.image2sku-alert').remove();
         
         if (this.files.length === 0) {
             $('#image2sku-previews').fadeOut(300);
@@ -128,14 +195,24 @@ jQuery(document).ready(function ($) {
         }
         
         // Validate files
-        const errors = validateFiles(this.files);
-        if (errors.length > 0) {
+        const validation = validateFiles(this.files);
+        
+        // Show errors if any
+        if (validation.errors.length > 0) {
             const errorMessage = $('<div>').addClass('image2sku-alert image2sku-alert-error').html(
-                '<i class="fas fa-exclamation-circle"></i><div>' + errors.join('<br>') + '</div>'
+                '<i class="fas fa-exclamation-circle"></i><div><strong>Cannot upload:</strong><br>' + validation.errors.join('<br><br>') + '</div>'
             );
             $('.image2sku-card').prepend(errorMessage);
             this.value = ''; // Clear the input
             return;
+        }
+        
+        // Show warnings if any
+        if (validation.warnings.length > 0) {
+            const warningMessage = $('<div>').addClass('image2sku-alert image2sku-alert-warning').html(
+                '<i class="fas fa-exclamation-triangle"></i><div><strong>Warnings:</strong><br>' + validation.warnings.join('<br><br>') + '<br><small>You can still proceed with the upload.</small></div>'
+            );
+            $('.image2sku-card').prepend(warningMessage);
         }
         
         displayPreviews(this.files);
@@ -160,11 +237,13 @@ jQuery(document).ready(function ($) {
         const formData = new FormData();
         formData.append('action', 'image2sku_upload_images');
         formData.append('security', image2sku_vars.nonce);
+        formData.append('rename_enabled', $('#image2sku_enable_rename').is(':checked') ? 'true' : 'false');
+        formData.append('handle_conflicts', $('#image2sku_handle_conflicts').is(':checked') ? 'true' : 'false');
         
         chunk.forEach(file => {
             formData.append('images[]', file);
         });
-        
+
         $.ajax({
             url: image2sku_vars.ajax_url,
             type: 'POST',
@@ -174,7 +253,13 @@ jQuery(document).ready(function ($) {
             success: function (response) {
                 if (response.success) {
                     // Merge results
-                    allResults = allResults.concat(response.data);
+                    allResults = allResults.concat(response.data.results);
+                    
+                    // Store rename and conflict data from first chunk only
+                    if (startIndex === 0) {
+                        window.imagesToRename = response.data.images_to_rename || [];
+                        window.imagesWithConflicts = response.data.images_with_conflicts || [];
+                    }
                     
                     // Check if there are more files to upload
                     if (endIndex < files.length) {
@@ -187,7 +272,14 @@ jQuery(document).ready(function ($) {
                         $('#image2sku-progress').val(100);
                         $('#image2sku-progress-text').html('<i class="fas fa-check-circle"></i> Upload complete!');
                         
-                        displayResults(allResults);
+                        // Check if we need to handle renaming or conflicts
+                        if (window.imagesToRename && window.imagesToRename.length > 0) {
+                            showRenameModal(window.imagesToRename, files);
+                        } else if (window.imagesWithConflicts && window.imagesWithConflicts.length > 0) {
+                            showConflictModal(window.imagesWithConflicts, files);
+                        } else {
+                            displayResults(allResults);
+                        }
                     }
                 } else {
                     // Error in chunk upload
@@ -263,7 +355,7 @@ jQuery(document).ready(function ($) {
         tableHTML += '<table class="table table-striped">';
         tableHTML += '<thead><tr><th>Product</th><th>Image</th><th>Filename</th><th>Status</th><th>Message</th><th>Action</th></tr></thead><tbody>';
 
-        results.forEach(result => {
+                    results.forEach(result => {
             const name = result.name || '-';
             const image = result.image || '<span style="color: var(--gray-400);">No image</span>';
             const link = result.link ? `<a href="${result.link}" target="_blank" class="image2sku-btn image2sku-btn-icon image2sku-btn-secondary" style="padding: 6px 12px; font-size: 12px;"><i class="fas fa-external-link-alt"></i></a>` : '-';
@@ -284,8 +376,8 @@ jQuery(document).ready(function ($) {
                 <td>${statusBadge}</td>
                 <td>${result.message || ''}</td>
                 <td>${link}</td>
-            </tr>`;
-        });
+    </tr>`;
+                    });
 
         tableHTML += '</tbody></table></div>';
         
@@ -305,8 +397,8 @@ jQuery(document).ready(function ($) {
         
         // Bind download button
         $('#image2sku-download-report').off('click').on('click', function () {
-            const csv = generateCSVReport(results);
-            downloadCSVReport(csv, 'image2sku-report.csv');
+                        const csv = generateCSVReport(results);
+                        downloadCSVReport(csv, 'image2sku-report.csv');
         });
         
         // Show/hide undo button
@@ -323,6 +415,158 @@ jQuery(document).ready(function ($) {
         $('html, body').animate({
             scrollTop: $('#image2sku-results').offset().top - 100
         }, 500);
+    }
+
+    // Function to show rename modal
+    function showRenameModal(imagesToRename, allFiles) {
+        let modalHTML = '<div class="image2sku-card">';
+        modalHTML += '<div class="image2sku-card-header"><i class="fas fa-edit"></i> Rename Images - SKU Not Found</div>';
+        modalHTML += '<div style="padding: 20px;"><p style="margin-bottom: 20px;">The following images could not be matched to products. Enter the correct SKU for each image:</p>';
+        modalHTML += '<form id="rename-form">';
+        
+        imagesToRename.forEach(item => {
+            modalHTML += `<div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px; padding: 15px; background: var(--gray-50); border-radius: 8px;">
+                <div style="flex: 1;"><strong>${item.filename}</strong><br><small style="color: var(--gray-500);">Original SKU: ${item.sku}</small></div>
+                <input type="text" class="rename-sku-input" data-index="${item.index}" placeholder="Enter correct SKU" 
+                       style="padding: 8px 12px; border: 2px solid var(--gray-300); border-radius: 6px; flex: 1;">
+            </div>`;
+        });
+        
+        modalHTML += '<div style="margin-top: 20px;"><button type="submit" class="image2sku-btn image2sku-btn-primary"><i class="fas fa-check"></i> Apply Renames</button></div>';
+        modalHTML += '</form></div></div>';
+        
+        $('#image2sku-results').html(modalHTML);
+        
+        $('#rename-form').on('submit', function(e) {
+            e.preventDefault();
+            const renameData = [];
+            $('.rename-sku-input').each(function() {
+                const newSKU = $(this).val().trim();
+                if (newSKU) {
+                    renameData.push({
+                        index: parseInt($(this).data('index')),
+                        new_sku: newSKU
+                    });
+                }
+            });
+            
+            if (renameData.length === 0) {
+                alert('Please enter at least one SKU');
+                return;
+            }
+            
+            processRenames(renameData, allFiles);
+        });
+    }
+    
+    // Function to process renames
+    function processRenames(renameData, allFiles) {
+        const formData = new FormData();
+        formData.append('action', 'image2sku_rename_images');
+        formData.append('security', image2sku_vars.nonce);
+        formData.append('rename_data', JSON.stringify(renameData));
+        
+        renameData.forEach(item => {
+            formData.append('images[]', allFiles[item.index]);
+        });
+        
+        $.ajax({
+            url: image2sku_vars.ajax_url,
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                if (response.success) {
+                    // Check if there are conflicts to handle
+                    if (window.imagesWithConflicts && window.imagesWithConflicts.length > 0) {
+                        showConflictModal(window.imagesWithConflicts, allFiles);
+                    } else {
+                        displayResults(response.data.results);
+                    }
+                }
+            }
+        });
+    }
+    
+    // Function to show conflict resolution modal
+    function showConflictModal(imagesWithConflicts, allFiles) {
+        let modalHTML = '<div class="image2sku-card">';
+        modalHTML += '<div class="image2sku-card-header"><i class="fas fa-exchange-alt"></i> Resolve Image Conflicts</div>';
+        modalHTML += '<div style="padding: 20px;"><p style="margin-bottom: 20px;">The following products already have featured images. Choose which image to use:</p>';
+        modalHTML += '<form id="conflict-form">';
+        
+        imagesWithConflicts.forEach(item => {
+            modalHTML += `<div style="margin-bottom: 25px; padding: 20px; background: var(--gray-50); border-radius: 8px;">
+                <h4 style="margin-bottom: 15px;">${item.product_name}</h4>
+                <div style="display: flex; gap: 20px; align-items: center;">
+                    <div style="flex: 1; text-align: center;">
+                        <p style="margin-bottom: 10px; font-weight: 600;">Existing Image</p>
+                        <img src="${item.existing_image_url}" style="max-width: 150px; max-height: 150px; border-radius: 8px; box-shadow: var(--shadow);">
+                        <br><label style="margin-top: 10px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="radio" name="choice_${item.index}" value="keep_existing" style="width: 18px; height: 18px;">
+                            <span>Keep This</span>
+                        </label>
+                    </div>
+                    <div style="flex: 1; text-align: center;">
+                        <p style="margin-bottom: 10px; font-weight: 600;">New Image</p>
+                        <p style="padding: 60px 20px; background: white; border: 2px dashed var(--gray-300); border-radius: 8px;">${item.filename}</p>
+                        <label style="margin-top: 10px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="radio" name="choice_${item.index}" value="use_new" checked style="width: 18px; height: 18px;">
+                            <span>Use This</span>
+                        </label>
+                    </div>
+                </div>
+            </div>`;
+        });
+        
+        modalHTML += '<div style="margin-top: 20px;"><button type="submit" class="image2sku-btn image2sku-btn-primary"><i class="fas fa-check"></i> Apply Choices</button></div>';
+        modalHTML += '</form></div></div>';
+        
+        $('#image2sku-results').html(modalHTML);
+        
+        $('#conflict-form').on('submit', function(e) {
+            e.preventDefault();
+            const conflictData = [];
+            
+            imagesWithConflicts.forEach(item => {
+                const choice = $(`input[name="choice_${item.index}"]:checked`).val();
+                conflictData.push({
+                    index: item.index,
+                    product_id: item.product_id,
+                    choice: choice
+                });
+            });
+            
+            processConflicts(conflictData, allFiles);
+        });
+    }
+    
+    // Function to process conflicts
+    function processConflicts(conflictData, allFiles) {
+        const formData = new FormData();
+        formData.append('action', 'image2sku_resolve_conflicts');
+        formData.append('security', image2sku_vars.nonce);
+        formData.append('conflict_data', JSON.stringify(conflictData));
+        
+        conflictData.forEach(item => {
+            if (item.choice === 'use_new') {
+                formData.append('images[]', allFiles[item.index]);
+            }
+        });
+        
+        $.ajax({
+            url: image2sku_vars.ajax_url,
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                if (response.success) {
+                    displayResults(response.data.results);
+                }
+            }
+        });
     }
 
     // Handle form submission
